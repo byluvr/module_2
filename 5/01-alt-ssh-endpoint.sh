@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/.env}"
+
+if [[ -f "$ENV_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+else
+    echo "ERROR: $ENV_FILE not found." >&2
+    exit 1
+fi
+
+LINUX_SSH_USER="${LINUX_SSH_USER:-sshuser}"
+LINUX_SSH_PASSWORD="${LINUX_SSH_PASSWORD:-P@ssw0rd}"
+LINUX_SSH_PORT="${LINUX_SSH_PORT:-2026}"
+SSH_ALLOW_USERS="${SSH_ALLOW_USERS:-$LINUX_SSH_USER}"
+SSH_MAX_AUTH_TRIES="${SSH_MAX_AUTH_TRIES:-2}"
+SSHD_CONFIG=/etc/openssh/sshd_config
+SUDOERS_FILE="/etc/sudoers.d/60-ansible-$LINUX_SSH_USER"
+BACKUP_DIR=/root/module_2_task_5_backups
+
+log() {
+    printf '[ALT SSH endpoint] %s\n' "$*"
+}
+
+die() {
+    printf 'ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+backup_file() {
+    local file="$1"
+
+    [[ -e "$file" ]] || return 0
+    install -d -m 0700 "$BACKUP_DIR"
+    cp -a -- "$file" "$BACKUP_DIR/$(basename "$file").$(date +%Y%m%d%H%M%S)"
+}
+
+[[ $EUID -eq 0 ]] || die "run this script as root"
+[[ "$LINUX_SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
+    die "LINUX_SSH_USER contains unsupported characters"
+[[ "$LINUX_SSH_PORT" =~ ^[0-9]+$ ]] &&
+    (( LINUX_SSH_PORT >= 1 && LINUX_SSH_PORT <= 65535 )) ||
+    die "LINUX_SSH_PORT must be from 1 to 65535"
+[[ "$SSH_MAX_AUTH_TRIES" =~ ^[1-9][0-9]*$ ]] ||
+    die "SSH_MAX_AUTH_TRIES must be a positive integer"
+[[ -f "$SSHD_CONFIG" ]] ||
+    die "$SSHD_CONFIG was not found"
+
+log "Installing OpenSSH server and sudo"
+apt-get update
+apt-get install -y openssh-server sudo
+
+if ! id "$LINUX_SSH_USER" >/dev/null 2>&1; then
+    log "Creating user $LINUX_SSH_USER"
+    useradd -m -s /bin/bash "$LINUX_SSH_USER"
+fi
+
+printf '%s:%s\n' "$LINUX_SSH_USER" "$LINUX_SSH_PASSWORD" | chpasswd
+usermod -aG wheel "$LINUX_SSH_USER"
+
+log "Configuring passwordless sudo for Ansible"
+install -d -m 0750 /etc/sudoers.d
+printf '%s ALL=(ALL:ALL) NOPASSWD: ALL\n' "$LINUX_SSH_USER" > "$SUDOERS_FILE"
+chmod 0440 "$SUDOERS_FILE"
+visudo -cf /etc/sudoers
+
+log "Configuring sshd"
+temp_config="$(mktemp)"
+awk '
+    $0 == "# BEGIN MODULE_2_TASK_5" {
+        in_managed_block = 1
+        next
+    }
+    $0 == "# END MODULE_2_TASK_5" {
+        in_managed_block = 0
+        next
+    }
+    in_managed_block {
+        next
+    }
+    /^[[:space:]]*(Port|AllowUsers|MaxAuthTries|PasswordAuthentication)[[:space:]]+/ {
+        print "# Disabled by module_2 task 5: " $0
+        next
+    }
+    { print }
+' "$SSHD_CONFIG" > "$temp_config"
+
+cat >> "$temp_config" <<EOF
+
+# BEGIN MODULE_2_TASK_5
+Port $LINUX_SSH_PORT
+AllowUsers $SSH_ALLOW_USERS
+MaxAuthTries $SSH_MAX_AUTH_TRIES
+PasswordAuthentication yes
+# END MODULE_2_TASK_5
+EOF
+
+sshd -t -f "$temp_config"
+if ! cmp -s "$temp_config" "$SSHD_CONFIG"; then
+    backup_file "$SSHD_CONFIG"
+    install -m 0600 "$temp_config" "$SSHD_CONFIG"
+fi
+rm -f -- "$temp_config"
+
+systemctl enable --now sshd
+systemctl restart sshd
+
+log "SSH endpoint configuration completed"
+printf 'User: %s\nPort: %s\nAllowed users: %s\n' \
+    "$LINUX_SSH_USER" "$LINUX_SSH_PORT" "$SSH_ALLOW_USERS"
+sshd -T | grep -E '^(port|allowusers|maxauthtries|passwordauthentication) '
+
