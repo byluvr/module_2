@@ -26,6 +26,37 @@ die() {
     exit 1
 }
 
+disable_unrestricted_wheel_rules() {
+    local file="$1"
+    local line
+    local changed=no
+    local temp_file
+    local backup_dir=/root/sudoers-backups
+    local rule_re
+
+    rule_re='^[[:space:]]*(%wheel|WHEEL_USERS)[[:space:]]+ALL[[:space:]]*=[[:space:]]*\([^)]*\)[[:space:]]*(NOPASSWD:[[:space:]]*)?ALL[[:space:]]*(#.*)?$'
+    temp_file="$(mktemp)"
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ $rule_re ]]; then
+            printf '# Disabled by module_2/1/03-hq-cli-finish.sh\n' >> "$temp_file"
+            printf '# %s\n' "$line" >> "$temp_file"
+            changed=yes
+        else
+            printf '%s\n' "$line" >> "$temp_file"
+        fi
+    done < "$file"
+
+    if [[ "$changed" == yes ]]; then
+        install -d -m 0700 "$backup_dir"
+        cp -a -- "$file" "$backup_dir/$(basename "$file").$(date +%Y%m%d%H%M%S)"
+        install -m 0440 "$temp_file" "$file"
+        log "Disabled an unrestricted wheel rule in $file"
+    fi
+
+    rm -f -- "$temp_file"
+}
+
 [[ $EUID -eq 0 ]] || die "run this script as root"
 
 log "Installing required local packages"
@@ -80,13 +111,6 @@ else
     log "Role mapping $resolved_group -> wheel already exists"
 fi
 
-log "Disabling the standard unrestricted sudo rule for wheel"
-if control sudowheel >/dev/null 2>&1; then
-    control sudowheel disabled
-elif grep -Eqi '^[[:space:]]*(WHEEL_USERS|%wheel)[[:space:]]+ALL=.*ALL[[:space:]]*$' /etc/sudoers; then
-    die "an unrestricted wheel rule is active and control sudowheel is unavailable"
-fi
-
 log "Writing the restricted sudo rule"
 install -d -m 0750 /etc/sudoers.d
 cat > "$SUDOERS_FILE" <<'EOF'
@@ -94,6 +118,23 @@ Cmnd_Alias HQ_LIMITED = /bin/cat, /usr/bin/cat, /bin/grep, /usr/bin/grep, /bin/i
 %wheel ALL=(ALL:ALL) HQ_LIMITED
 EOF
 chmod 0440 "$SUDOERS_FILE"
+visudo -cf /etc/sudoers
+
+log "Disabling the standard unrestricted sudo rule for wheel"
+if control sudowheel >/dev/null 2>&1; then
+    control sudowheel disabled
+elif grep -Eqi '^[[:space:]]*(WHEEL_USERS|%wheel)[[:space:]]+ALL=.*ALL[[:space:]]*$' /etc/sudoers; then
+    die "an unrestricted wheel rule is active and control sudowheel is unavailable"
+fi
+
+log "Disabling unrestricted wheel rules in sudoers drop-ins"
+shopt -s nullglob
+for sudoers_dropin in /etc/sudoers.d/*; do
+    [[ -f "$sudoers_dropin" ]] || continue
+    [[ "$sudoers_dropin" == "$SUDOERS_FILE" ]] && continue
+    disable_unrestricted_wheel_rules "$sudoers_dropin"
+done
+shopt -u nullglob
 
 visudo -cf /etc/sudoers
 
@@ -109,7 +150,7 @@ printf '%s\n' "$sudo_policy"
 
 if grep -Eq '^[[:space:]]*\(ALL([[:space:]]*:[[:space:]]*ALL)?\)[[:space:]]+(NOPASSWD:[[:space:]]*)?ALL[[:space:]]*$' \
     <<< "$sudo_policy"; then
-    die "an unrestricted sudo rule is still active for $resolved_user"
+    die "an unrestricted sudo rule is still active for $resolved_user; inspect /etc/sudoers and /etc/sudoers.d"
 fi
 
 grep -Fq '/bin/cat' <<< "$sudo_policy" ||
