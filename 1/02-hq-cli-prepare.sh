@@ -31,8 +31,13 @@ die() {
 [[ $EUID -eq 0 ]] || die "run this script as root"
 [[ -n "$BR_SRV_IP" ]] || die "BR_SRV_IP is empty"
 
-log "Installing the ALT Linux AD client, role module and DNS tools"
+log "Refreshing package metadata"
 apt-get update
+
+log "Synchronizing the split alterator-datetime packages"
+apt-get install -y alterator-datetime alterator-datetime-functions
+
+log "Installing the ALT Linux AD client, role module and DNS tools"
 apt-get install -y task-auth-ad-sssd libnss-role bind-utils
 
 current_hostname="$(hostname -s | tr '[:upper:]' '[:lower:]')"
@@ -73,4 +78,3 @@ GUI method:
 After a successful join, reboot HQ-CLI and run:
   ./03-hq-cli-finish.sh
 EOF
-
