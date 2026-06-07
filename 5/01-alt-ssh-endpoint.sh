@@ -54,6 +54,13 @@ apt-get install -y openssh-server sudo
 [[ -f "$SSHD_CONFIG" ]] ||
     die "$SSHD_CONFIG was not created after installing openssh-server"
 
+log "Generating missing SSH host keys"
+ssh-keygen -A
+if ! find /etc/openssh -maxdepth 1 -type f \
+    -name 'ssh_host_*_key' -size +0c -print -quit | grep -q .; then
+    die "SSH host keys were not created in /etc/openssh"
+fi
+
 if ! id "$LINUX_SSH_USER" >/dev/null 2>&1; then
     log "Creating user $LINUX_SSH_USER"
     useradd -m -s /bin/bash "$LINUX_SSH_USER"

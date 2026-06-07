@@ -36,6 +36,7 @@ bash 01-alt-ssh-endpoint.sh
 - добавляет пользователя в `wheel`;
 - создаёт отдельное правило `NOPASSWD: ALL` для Ansible;
 - устанавливает `openssh-server`;
+- создаёт отсутствующие серверные SSH-ключи командой `ssh-keygen -A`;
 - изменяет `/etc/openssh/sshd_config`;
 - настраивает SSH-порт, `AllowUsers`, `MaxAuthTries` и вход по паролю;
 - включает `sshd` в автозагрузку и запускает службу;
