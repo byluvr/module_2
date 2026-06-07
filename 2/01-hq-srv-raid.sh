@@ -51,8 +51,27 @@ normalize_devices() {
     local device
 
     for device in "$@"; do
+        [[ -n "$device" ]] || continue
         readlink -f "$device"
     done | sort -u | tr '\n' ' '
+}
+
+get_array_members() {
+    local array_device="$1"
+    local member_candidate
+    local member
+
+    while read -r member_candidate; do
+        [[ "$member_candidate" == /dev/* ]] || continue
+        member="$(readlink -f "$member_candidate" 2>/dev/null || true)"
+        [[ -b "$member" ]] || continue
+        [[ "$(lsblk -dnro TYPE "$member" 2>/dev/null || true)" == disk ]] ||
+            continue
+        printf '%s\n' "$member"
+    done < <(
+        mdadm --detail "$array_device" |
+            awk 'NF > 1 && $NF ~ "^/dev/" { print $NF }'
+    )
 }
 
 check_disk_mounts_before_rebuild() {
@@ -188,11 +207,11 @@ if mdadm --detail "$RAID_DEVICE" >/dev/null 2>&1; then
 
     while read -r member; do
         [[ -n "$member" ]] || continue
-        current_members+=("$(readlink -f "$member")")
-    done < <(
-        mdadm --detail "$RAID_DEVICE" |
-            awk '$NF ~ "^/dev/" { print $NF }'
-    )
+        current_members+=("$member")
+    done < <(get_array_members "$RAID_DEVICE")
+
+    (( ${#current_members[@]} > 0 )) ||
+        die "cannot determine member disks of $RAID_DEVICE"
 
     desired_members_normalized="$(normalize_devices "${DISKS[@]}")"
     current_members_normalized="$(normalize_devices "${current_members[@]}")"
@@ -241,10 +260,14 @@ if [[ "$array_exists" == no || "$rebuild_required" == yes ]]; then
     cleanup_disks_normalized=()
     while read -r disk; do
         [[ -n "$disk" ]] || continue
+        [[ -b "$disk" ]] || continue
+        [[ "$(lsblk -dnro TYPE "$disk" 2>/dev/null || true)" == disk ]] ||
+            continue
         cleanup_disks_normalized+=("$disk")
     done < <(
         for disk in "${cleanup_disks[@]}"; do
-            readlink -f "$disk"
+            [[ -n "$disk" ]] || continue
+            readlink -f "$disk" 2>/dev/null || true
         done | sort -u
     )
 

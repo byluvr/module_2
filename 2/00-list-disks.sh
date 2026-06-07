@@ -72,12 +72,16 @@ candidates=()
 declare -A current_members=()
 if command -v mdadm >/dev/null 2>&1 &&
     mdadm --detail "$RAID_DEVICE" >/dev/null 2>&1; then
-    while read -r member; do
-        [[ -n "$member" ]] || continue
-        current_members["$(readlink -f "$member")"]=1
+    while read -r member_candidate; do
+        [[ "$member_candidate" == /dev/* ]] || continue
+        member="$(readlink -f "$member_candidate" 2>/dev/null || true)"
+        [[ -b "$member" ]] || continue
+        [[ "$(lsblk -dnro TYPE "$member" 2>/dev/null || true)" == disk ]] ||
+            continue
+        current_members["$member"]=1
     done < <(
         mdadm --detail "$RAID_DEVICE" |
-            awk '$NF ~ "^/dev/" { print $NF }'
+            awk 'NF > 1 && $NF ~ "^/dev/" { print $NF }'
     )
 fi
 
@@ -133,4 +137,3 @@ echo
 echo "Updated RAID_DISKS in $ENV_FILE"
 grep '^RAID_DISKS=' "$ENV_FILE"
 echo
-echo "ERASE_DISKS was not changed."
