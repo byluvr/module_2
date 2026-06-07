@@ -88,14 +88,45 @@ chmod +x ./*.sh
 
 После успешной проверки DNS используйте один из вариантов.
 
+Если скрипт сообщил, что изменил hostname, сначала перезагрузите `HQ-CLI`.
+ЦУС следует открывать заново уже после перезагрузки.
+
 Командная строка:
 
 ```bash
-system-auth write ad au-team.irpo hq-cli AU-TEAM administrator
+read -rsp "Domain password: " DOMAIN_JOIN_PASSWORD; echo
+system-auth write ad au-team.irpo hq-cli AU-TEAM Administrator "$DOMAIN_JOIN_PASSWORD"
+unset DOMAIN_JOIN_PASSWORD
 ```
 
 Или ЦУС: **Пользователи → Аутентификация → Active Directory**, backend
-`SSSD`. После успешного ввода обязательно перезагрузите `HQ-CLI`.
+`SSSD`. Поля должны быть заполнены так:
+
+```text
+Domain:        au-team.irpo
+Workgroup:     AU-TEAM
+Computer name: hq-cli
+```
+
+Поле `Workgroup` нельзя оставлять пустым. В поле `Computer name` указывается
+короткое имя без `.au-team.irpo`.
+
+Если ЦУС сообщает `Unable to find specified domain`, проверьте на `HQ-CLI`:
+
+```bash
+cat /etc/resolv.conf
+host -t SRV _ldap._tcp.au-team.irpo
+host -t SRV _kerberos._udp.au-team.irpo
+```
+
+В `/etc/resolv.conf` должны находиться:
+
+```text
+search au-team.irpo
+nameserver 192.168.0.2
+```
+
+После успешного ввода обязательно перезагрузите `HQ-CLI`.
 
 ### 3. HQ-CLI: роли и sudo
 

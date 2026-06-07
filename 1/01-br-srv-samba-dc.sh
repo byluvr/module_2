@@ -16,6 +16,8 @@ DOMAIN_FQDN="${DOMAIN_FQDN:-au-team.irpo}"
 DOMAIN_REALM="${DOMAIN_FQDN^^}"
 DOMAIN_NETBIOS="${DOMAIN_NETBIOS:-AU-TEAM}"
 DC_HOSTNAME="${DC_HOSTNAME:-br-srv}"
+DC_COMPUTER_NAME="${DC_HOSTNAME%%.*}"
+DC_FQDN="${DC_COMPUTER_NAME}.${DOMAIN_FQDN}"
 BR_SRV_INTERFACE="${BR_SRV_INTERFACE:-ens19}"
 DNS_FORWARDER="${DNS_FORWARDER:-8.8.8.8}"
 DOMAIN_ADMIN_PASSWORD="${DOMAIN_ADMIN_PASSWORD:-}"
@@ -39,10 +41,9 @@ die() {
 [[ -n "$HQ_USER_PASSWORD" ]] || die "HQ_USER_PASSWORD is empty"
 [[ "$HQ_USER_COUNT" =~ ^[1-9][0-9]*$ ]] || die "HQ_USER_COUNT must be a positive integer"
 
-current_hostname="$(hostname -s | tr '[:upper:]' '[:lower:]')"
-if [[ "$current_hostname" != "${DC_HOSTNAME,,}" ]]; then
-    log "WARNING: current hostname is '$current_hostname', expected '${DC_HOSTNAME,,}'."
-    log "Change the hostname before provisioning if this is a new controller."
+current_hostname="$(hostname -f 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+if [[ "$current_hostname" != "${DC_FQDN,,}" ]]; then
+    log "WARNING: current hostname is '$current_hostname', expected '${DC_FQDN,,}'."
 fi
 
 log "Installing Samba DC and DNS diagnostic tools"
@@ -81,6 +82,9 @@ else
     rm -f -- /etc/samba/smb.conf
     rm -rf -- /var/lib/samba /var/cache/samba
     mkdir -p /var/lib/samba/sysvol
+
+    log "Setting the domain controller hostname to ${DC_FQDN,,}"
+    hostnamectl set-hostname "${DC_FQDN,,}"
 
     log "Provisioning domain $DOMAIN_REALM"
     samba-tool domain provision \
@@ -147,5 +151,6 @@ samba-tool group listmembers "$HQ_GROUP"
 
 log "Checking the LDAP DNS service record"
 host -t SRV "_ldap._tcp.$DOMAIN_FQDN" 127.0.0.1
+host -t A "$DC_FQDN" 127.0.0.1
 
 log "BR-SRV configuration completed"
