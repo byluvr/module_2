@@ -25,11 +25,16 @@ source "$ENV_FILE"
 
 EXPECTED_DISK_SIZE_GIB="${EXPECTED_DISK_SIZE_GIB:-1}"
 RAID_LEVEL="${RAID_LEVEL:-0}"
+RAID_NAME="${RAID_NAME:-md0}"
+RAID_NAME="${RAID_NAME#/dev/}"
+RAID_DEVICE="/dev/$RAID_NAME"
 
 [[ "$EXPECTED_DISK_SIZE_GIB" =~ ^[1-9][0-9]*$ ]] ||
     die "EXPECTED_DISK_SIZE_GIB must be a positive integer for automatic selection"
 [[ "$RAID_LEVEL" =~ ^(0|1|5)$ ]] ||
     die "RAID_LEVEL must be 0, 1 or 5"
+[[ "$RAID_NAME" =~ ^md[0-9]+$ ]] ||
+    die "RAID_NAME must look like md0 or md1"
 
 echo "Block devices:"
 lsblk -e 7 -o NAME,PATH,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,SERIAL
@@ -64,10 +69,27 @@ done < <(
 )
 
 candidates=()
+declare -A current_members=()
+if command -v mdadm >/dev/null 2>&1 &&
+    mdadm --detail "$RAID_DEVICE" >/dev/null 2>&1; then
+    while read -r member; do
+        [[ -n "$member" ]] || continue
+        current_members["$(readlink -f "$member")"]=1
+    done < <(
+        mdadm --detail "$RAID_DEVICE" |
+            awk '$NF ~ "^/dev/" { print $NF }'
+    )
+fi
+
 while read -r name size type; do
     [[ "$type" == disk ]] || continue
     ((size >= lower_bound && size <= upper_bound)) || continue
     [[ -z "${system_disks[$name]:-}" ]] || continue
+
+    if [[ -n "${current_members[$name]:-}" ]]; then
+        candidates+=("$name")
+        continue
+    fi
 
     if lsblk -nrpo MOUNTPOINT "$name" | grep -q '[^[:space:]]'; then
         continue
@@ -91,26 +113,16 @@ printf 'Selected disks: %s\n' "${candidates[*]}"
 
 temp_file="$(mktemp)"
 awk -v disks="${candidates[*]}" '
-    BEGIN {
-        disks_replaced = 0
-        erase_replaced = 0
-    }
+    BEGIN { disks_replaced = 0 }
     /^RAID_DISKS=/ {
         print "RAID_DISKS=\"" disks "\""
         disks_replaced = 1
-        next
-    }
-    /^ERASE_DISKS=/ {
-        print "ERASE_DISKS=no"
-        erase_replaced = 1
         next
     }
     { print }
     END {
         if (!disks_replaced)
             print "RAID_DISKS=\"" disks "\""
-        if (!erase_replaced)
-            print "ERASE_DISKS=no"
     }
 ' "$ENV_FILE" > "$temp_file"
 
@@ -121,4 +133,4 @@ echo
 echo "Updated RAID_DISKS in $ENV_FILE"
 grep '^RAID_DISKS=' "$ENV_FILE"
 echo
-echo "ERASE_DISKS was reset to no. Review the selected disks before enabling erasure."
+echo "ERASE_DISKS was not changed."

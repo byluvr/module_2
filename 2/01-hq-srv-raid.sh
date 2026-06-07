@@ -47,6 +47,27 @@ backup_file() {
     cp -a -- "$file" "$backup_dir/$(basename "$file").$(date +%Y%m%d%H%M%S)"
 }
 
+normalize_devices() {
+    local device
+
+    for device in "$@"; do
+        readlink -f "$device"
+    done | sort -u | tr '\n' ' '
+}
+
+check_disk_mounts_before_rebuild() {
+    local disk
+    local mount_point
+
+    for disk in "$@"; do
+        while IFS= read -r mount_point; do
+            [[ -n "$mount_point" ]] || continue
+            [[ "$mount_point" == "$MOUNT_POINT" ]] ||
+                die "$disk is used by an unexpected mount point: $mount_point"
+        done < <(lsblk -nrpo MOUNTPOINT "$disk" | awk 'NF')
+    done
+}
+
 write_mdadm_config() {
     local array_line="$1"
     local temp_file
@@ -130,11 +151,6 @@ for disk in "${DISKS[@]}"; do
         die "$disk is listed more than once"
     seen_disks["$disk"]=1
 
-    if lsblk -nrpo MOUNTPOINT "$disk" | grep -q '[^[:space:]]'; then
-        lsblk -o NAME,PATH,SIZE,TYPE,FSTYPE,MOUNTPOINT "$disk" >&2
-        die "$disk or one of its partitions is mounted"
-    fi
-
     if (( EXPECTED_DISK_SIZE_GIB > 0 )); then
         disk_size="$(blockdev --getsize64 "$disk")"
         expected_size=$((EXPECTED_DISK_SIZE_GIB * 1024 * 1024 * 1024))
@@ -159,25 +175,102 @@ printf '  Partition:   %s\n' "$CREATE_PARTITION"
 printf '  Mount point: %s\n' "$MOUNT_POINT"
 
 array_exists=no
+rebuild_required=no
+rebuild_reasons=()
+current_members=()
+
 if mdadm --detail "$RAID_DEVICE" >/dev/null 2>&1; then
     array_exists=yes
     current_level="$(mdadm --detail "$RAID_DEVICE" |
         awk -F: '/Raid Level/ { gsub(/[[:space:]]/, "", $2); sub(/^raid/, "", $2); print $2 }')"
     current_device_count="$(mdadm --detail "$RAID_DEVICE" |
         awk -F: '/Raid Devices/ { gsub(/[[:space:]]/, "", $2); print $2; exit }')"
-    [[ "$current_level" == "$RAID_LEVEL" ]] ||
-        die "$RAID_DEVICE already exists with RAID level $current_level"
-    [[ "$current_device_count" == "${#DISKS[@]}" ]] ||
-        die "$RAID_DEVICE contains $current_device_count RAID devices, but RAID_DISKS contains ${#DISKS[@]}"
-    log "$RAID_DEVICE already exists; keeping the array"
+
+    while read -r member; do
+        [[ -n "$member" ]] || continue
+        current_members+=("$(readlink -f "$member")")
+    done < <(
+        mdadm --detail "$RAID_DEVICE" |
+            awk '$NF ~ "^/dev/" { print $NF }'
+    )
+
+    desired_members_normalized="$(normalize_devices "${DISKS[@]}")"
+    current_members_normalized="$(normalize_devices "${current_members[@]}")"
+
+    if [[ "$current_level" != "$RAID_LEVEL" ]]; then
+        rebuild_required=yes
+        rebuild_reasons+=("level: RAID $current_level -> RAID $RAID_LEVEL")
+    fi
+
+    if [[ "$current_device_count" != "${#DISKS[@]}" ]]; then
+        rebuild_required=yes
+        rebuild_reasons+=("device count: $current_device_count -> ${#DISKS[@]}")
+    fi
+
+    if [[ "$current_members_normalized" != "$desired_members_normalized" ]]; then
+        rebuild_required=yes
+        rebuild_reasons+=("member disks changed")
+    fi
+
+    if [[ "$CREATE_PARTITION" == yes ]]; then
+        if [[ ! -b "$RAID_PARTITION" ]] &&
+            [[ -n "$(blkid -o value -s TYPE "$RAID_DEVICE" 2>/dev/null || true)" ]]; then
+            rebuild_required=yes
+            rebuild_reasons+=("layout: filesystem on array -> partitioned array")
+        fi
+    elif lsblk -nrpo TYPE "$RAID_DEVICE" | grep -qx part; then
+        rebuild_required=yes
+        rebuild_reasons+=("layout: partitioned array -> filesystem on array")
+    fi
+
+    if [[ "$rebuild_required" == no ]]; then
+        log "$RAID_DEVICE already matches .env; keeping the array and its data"
+    fi
 fi
 
-if [[ "$array_exists" == no ]]; then
+if [[ "$array_exists" == no || "$rebuild_required" == yes ]]; then
     [[ "$ERASE_DISKS" == yes ]] ||
-        die "disk erasure is disabled. Verify RAID_DISKS, then set ERASE_DISKS=yes"
+        die "creation or rebuilding is required, but ERASE_DISKS is not yes"
+
+    if [[ "$rebuild_required" == yes ]]; then
+        log "The existing array does not match .env and will be rebuilt"
+        printf '  Reason: %s\n' "${rebuild_reasons[@]}"
+    fi
+
+    cleanup_disks=("${DISKS[@]}" "${current_members[@]}")
+    cleanup_disks_normalized=()
+    while read -r disk; do
+        [[ -n "$disk" ]] || continue
+        cleanup_disks_normalized+=("$disk")
+    done < <(
+        for disk in "${cleanup_disks[@]}"; do
+            readlink -f "$disk"
+        done | sort -u
+    )
+
+    check_disk_mounts_before_rebuild "${cleanup_disks_normalized[@]}"
+
+    if mountpoint -q "$MOUNT_POINT"; then
+        mounted_source="$(findmnt -nro SOURCE --target "$MOUNT_POINT")"
+        if ! lsblk -s -nrpo NAME "$mounted_source" | grep -Fqx "$RAID_DEVICE"; then
+            die "$MOUNT_POINT is not mounted from $RAID_DEVICE"
+        fi
+        log "Unmounting $MOUNT_POINT before rebuilding"
+        umount "$MOUNT_POINT"
+    fi
+
+    if [[ "$array_exists" == yes ]]; then
+        log "Stopping the old array"
+        [[ -b "$RAID_PARTITION" ]] &&
+            wipefs --all --force "$RAID_PARTITION" >/dev/null 2>&1 || true
+        wipefs --all --force "$RAID_DEVICE" >/dev/null 2>&1 || true
+        mdadm --stop "$RAID_DEVICE"
+        udevadm settle
+        array_exists=no
+    fi
 
     log "Erasing old RAID metadata and filesystem signatures"
-    for disk in "${DISKS[@]}"; do
+    for disk in "${cleanup_disks_normalized[@]}"; do
         mdadm --zero-superblock --force "$disk" >/dev/null 2>&1 || true
         wipefs --all --force "$disk"
     done
@@ -189,6 +282,7 @@ if [[ "$array_exists" == no ]]; then
         --force \
         "${DISKS[@]}"
     udevadm settle
+    array_exists=yes
 fi
 
 array_line="$(mdadm --detail --brief "$RAID_DEVICE" | head -n 1)"
@@ -233,7 +327,10 @@ if [[ -z "$existing_filesystem" ]]; then
     log "Creating ext4 on $filesystem_device"
     mkfs.ext4 -F "$filesystem_device"
 elif [[ "$existing_filesystem" != "$FILESYSTEM" ]]; then
-    die "$filesystem_device already contains $existing_filesystem, expected $FILESYSTEM"
+    [[ "$ERASE_DISKS" == yes ]] ||
+        die "$filesystem_device contains $existing_filesystem; ERASE_DISKS=yes is required to replace it"
+    log "Replacing $existing_filesystem with $FILESYSTEM on $filesystem_device"
+    mkfs.ext4 -F "$filesystem_device"
 else
     log "$filesystem_device already contains $FILESYSTEM"
 fi
