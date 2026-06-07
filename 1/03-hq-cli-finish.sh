@@ -115,7 +115,7 @@ log "Writing the restricted sudo rule"
 install -d -m 0750 /etc/sudoers.d
 cat > "$SUDOERS_FILE" <<'EOF'
 Cmnd_Alias HQ_LIMITED = /bin/cat, /usr/bin/cat, /bin/grep, /usr/bin/grep, /bin/id, /usr/bin/id
-%wheel ALL=(ALL:ALL) HQ_LIMITED
+%wheel ALL=(ALL:ALL) NOPASSWD: HQ_LIMITED
 EOF
 chmod 0440 "$SUDOERS_FILE"
 visudo -cf /etc/sudoers
@@ -155,6 +155,9 @@ fi
 
 grep -Fq '/bin/cat' <<< "$sudo_policy" ||
     die "the restricted sudo command list is not effective for $resolved_user"
+
+grep -Eq 'NOPASSWD:.*(/bin/cat|HQ_LIMITED)' <<< "$sudo_policy" ||
+    die "NOPASSWD is not effective for the restricted command list"
 
 cat <<EOF
 
