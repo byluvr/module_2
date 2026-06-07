@@ -78,6 +78,12 @@ else
     printf 'search_domains=%s\n' "$DOMAIN_FQDN" >> "$resolvconf_config"
 fi
 
+if grep -q '^name_servers=' "$resolvconf_config"; then
+    sed -i "s|^name_servers=.*|name_servers=$BR_SRV_IP|" "$resolvconf_config"
+else
+    printf 'name_servers=%s\n' "$BR_SRV_IP" >> "$resolvconf_config"
+fi
+
 log "Updating the system resolver configuration"
 resolvconf -u
 
@@ -86,11 +92,10 @@ host -t SRV "_ldap._tcp.$DOMAIN_FQDN" "$BR_SRV_IP"
 host -t SRV "_kerberos._udp.$DOMAIN_FQDN" "$BR_SRV_IP"
 
 log "Checking the system resolver used by the domain join tools"
-if ! awk -v server="$BR_SRV_IP" \
-    '$1 == "nameserver" && $2 == server { found = 1 } END { exit !found }' \
-    /etc/resolv.conf; then
+first_nameserver="$(awk '$1 == "nameserver" { print $2; exit }' /etc/resolv.conf)"
+if [[ "$first_nameserver" != "$BR_SRV_IP" ]]; then
     cat /etc/resolv.conf >&2
-    die "/etc/resolv.conf does not use BR-SRV as DNS"
+    die "the first DNS server is $first_nameserver, expected BR-SRV ($BR_SRV_IP)"
 fi
 
 if ! awk -v domain="$DOMAIN_FQDN" \
