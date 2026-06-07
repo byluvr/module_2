@@ -17,9 +17,14 @@ LINUX_SSH_PORT=2026
 ROUTER_SSH_PORT=22
 ```
 
-## HQ-SRV и HQ-CLI
+## HQ-SRV
 
-На обеих машинах запустите один файл:
+SSH на `HQ-SRV` должен быть настроен заранее. Скрипт задания его не
+переустанавливает и не изменяет.
+
+## HQ-CLI
+
+На `HQ-CLI` запустите:
 
 ```bash
 bash 01-alt-ssh-endpoint.sh
@@ -30,7 +35,10 @@ bash 01-alt-ssh-endpoint.sh
 - создаёт `sshuser` с паролем из `.env`;
 - добавляет пользователя в `wheel`;
 - создаёт отдельное правило `NOPASSWD: ALL` для Ansible;
-- настраивает SSH-порт, `AllowUsers` и `MaxAuthTries`;
+- устанавливает `openssh-server`;
+- изменяет `/etc/openssh/sshd_config`;
+- настраивает SSH-порт, `AllowUsers`, `MaxAuthTries` и вход по паролю;
+- включает `sshd` в автозагрузку и запускает службу;
 - проверяет конфигурацию командой `sshd -t`.
 
 ## HQ-RTR и BR-RTR
@@ -55,13 +63,17 @@ bash 02-br-srv-ansible-controller.sh
 
 Скрипт:
 
-1. Устанавливает Ansible, `sshpass`, pip и SSH-клиент.
+1. Устанавливает Ansible, `sshpass` и pip. SSH на `BR-SRV` не устанавливается.
 2. Устанавливает `ansible.netcommon`, `cisco.ios`, `ansible-pylibssh`.
 3. Создаёт `hosts.ini` рядом со скриптом.
 4. Копирует inventory и `ansible.cfg` в `/etc/ansible`.
 5. Создаёт SSH-ключ контроллера.
 6. Копирует ключ на `HQ-SRV` и `HQ-CLI`.
 7. Проверяет структуру inventory.
+
+На `BR-SRV` заранее должны быть доступны команды `ssh`, `ssh-keygen` и
+`ssh-copy-id`. Скрипт проверит их наличие и сообщит об ошибке, но устанавливать
+SSH-пакеты не будет.
 
 ## Итоговая проверка
 

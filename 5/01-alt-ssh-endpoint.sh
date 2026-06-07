@@ -22,7 +22,7 @@ SUDOERS_FILE="/etc/sudoers.d/60-ansible-$LINUX_SSH_USER"
 BACKUP_DIR=/root/module_2_task_5_backups
 
 log() {
-    printf '[ALT SSH endpoint] %s\n' "$*"
+    printf '[HQ-CLI SSH] %s\n' "$*"
 }
 
 die() {
@@ -46,12 +46,13 @@ backup_file() {
     die "LINUX_SSH_PORT must be from 1 to 65535"
 [[ "$SSH_MAX_AUTH_TRIES" =~ ^[1-9][0-9]*$ ]] ||
     die "SSH_MAX_AUTH_TRIES must be a positive integer"
-[[ -f "$SSHD_CONFIG" ]] ||
-    die "$SSHD_CONFIG was not found"
 
 log "Installing OpenSSH server and sudo"
 apt-get update
 apt-get install -y openssh-server sudo
+
+[[ -f "$SSHD_CONFIG" ]] ||
+    die "$SSHD_CONFIG was not created after installing openssh-server"
 
 if ! id "$LINUX_SSH_USER" >/dev/null 2>&1; then
     log "Creating user $LINUX_SSH_USER"
@@ -105,11 +106,15 @@ if ! cmp -s "$temp_config" "$SSHD_CONFIG"; then
 fi
 rm -f -- "$temp_config"
 
-systemctl enable --now sshd
+log "Enabling and restarting sshd"
+systemctl enable sshd
 systemctl restart sshd
+systemctl is-enabled --quiet sshd ||
+    die "sshd is not enabled"
+systemctl is-active --quiet sshd ||
+    die "sshd is not running"
 
-log "SSH endpoint configuration completed"
+log "HQ-CLI SSH configuration completed"
 printf 'User: %s\nPort: %s\nAllowed users: %s\n' \
     "$LINUX_SSH_USER" "$LINUX_SSH_PORT" "$SSH_ALLOW_USERS"
 sshd -T | grep -E '^(port|allowusers|maxauthtries|passwordauthentication) '
-

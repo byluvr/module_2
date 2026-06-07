@@ -62,7 +62,12 @@ validate_ipv4 BR_RTR_IP "$BR_RTR_IP"
 
 log "Installing Ansible, sshpass and Python tools"
 apt-get update
-apt-get install -y ansible sshpass python3-module-pip openssh-clients
+apt-get install -y ansible sshpass python3-module-pip
+
+for command_name in ssh ssh-keygen ssh-copy-id; do
+    command -v "$command_name" >/dev/null 2>&1 ||
+        die "$command_name is missing; BR-SRV SSH must be configured beforehand"
+done
 
 log "Installing network collections"
 ansible-galaxy collection install ansible.netcommon
