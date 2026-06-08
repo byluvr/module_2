@@ -104,3 +104,9 @@ http://docker.au-team.irpo/
 ```text
 /root/module_2_task_9_10_backups
 ```
+
+Если подключение не происходит, попробовать записать данные строки в /etc/hosts на клиенте:
+```text
+isp-ip web.au-team.irpo
+isp-ip docker.au-team.irpo
+```
