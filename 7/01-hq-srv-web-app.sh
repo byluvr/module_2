@@ -16,13 +16,12 @@ ISO_DEVICE="${ISO_DEVICE:-/dev/sr0}"
 ISO_MOUNT="${ISO_MOUNT:-/mnt}"
 WEB_SOURCE_DIR="${WEB_SOURCE_DIR:-web}"
 WEB_ROOT="${WEB_ROOT:-/var/www/html}"
-WEB_PORT=80
+WEB_PORT="${WEB_PORT:?WEB_PORT is required in $ENV_FILE}"
 DB_HOST="${DB_HOST:-localhost}"
 DB_NAME="${DB_NAME:-webdb}"
 DB_USER="${DB_USER:-webc}"
 DB_PASSWORD="${DB_PASSWORD:-P@ssw0rd}"
 RESET_DATABASE="${RESET_DATABASE:-yes}"
-REPORT_FILE=/root/module_2_task_7_web_report.txt
 
 log() {
     printf '[HQ-SRV Web] %s\n' "$*"
@@ -202,22 +201,7 @@ http_code="$(
     die "Apache returned HTTP $http_code"
 
 server_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-{
-    printf 'Module 2, task 7 - web application on HQ-SRV\n'
-    printf 'Web server: Apache (httpd2)\n'
-    printf 'Document root: %s\n' "$WEB_ROOT"
-    printf 'Application URL: http://%s:%s/\n' "${server_ip:-HQ-SRV-IP}" "$WEB_PORT"
-    printf 'Database server: MariaDB\n'
-    printf 'Database host: %s\n' "$DB_HOST"
-    printf 'Database name: %s\n' "$DB_NAME"
-    printf 'Database user: %s\n' "$DB_USER"
-    printf 'Database password: %s\n' "$DB_PASSWORD"
-    printf 'Imported tables: %s\n' "$table_count"
-    printf 'HTTP check: %s\n' "$http_code"
-} > "$REPORT_FILE"
-chmod 0600 "$REPORT_FILE"
 
 log "Deployment completed"
 printf 'Application URL: http://%s:%s/\n' "${server_ip:-HQ-SRV-IP}" "$WEB_PORT"
 printf 'Imported tables: %s\n' "$table_count"
-printf 'Report: %s\n' "$REPORT_FILE"

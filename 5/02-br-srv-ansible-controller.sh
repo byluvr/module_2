@@ -15,18 +15,17 @@ else
     exit 1
 fi
 
-HQ_SRV_IP="${HQ_SRV_IP:-192.168.1.10}"
-HQ_CLI_IP="${HQ_CLI_IP:-192.168.2.10}"
-HQ_RTR_IP="${HQ_RTR_IP:-10.10.10.1}"
-BR_RTR_IP="${BR_RTR_IP:-192.168.3.1}"
+HQ_SRV_IP="${HQ_SRV_IP:?HQ_SRV_IP is required in $ENV_FILE}"
+HQ_CLI_IP="${HQ_CLI_IP:?HQ_CLI_IP is required in $ENV_FILE}"
+HQ_RTR_IP="${HQ_RTR_IP:?HQ_RTR_IP is required in $ENV_FILE}"
+BR_RTR_IP="${BR_RTR_IP:?BR_RTR_IP is required in $ENV_FILE}"
 LINUX_SSH_USER="${LINUX_SSH_USER:-sshuser}"
 LINUX_SSH_PASSWORD="${LINUX_SSH_PASSWORD:-P@ssw0rd}"
-LINUX_SSH_PORT="${LINUX_SSH_PORT:-2026}"
+LINUX_SSH_PORT="${LINUX_SSH_PORT:?LINUX_SSH_PORT is required in $ENV_FILE}"
 ROUTER_SSH_USER="${ROUTER_SSH_USER:-net_admin}"
 ROUTER_SSH_PASSWORD="${ROUTER_SSH_PASSWORD:-P@ssw0rd}"
-ROUTER_SSH_PORT="${ROUTER_SSH_PORT:-22}"
+ROUTER_SSH_PORT="${ROUTER_SSH_PORT:?ROUTER_SSH_PORT is required in $ENV_FILE}"
 ANSIBLE_SSH_KEY="${ANSIBLE_SSH_KEY:-/root/.ssh/id_rsa}"
-BACKUP_DIR=/root/module_2_task_5_backups
 
 log() {
     printf '[BR-SRV Ansible] %s\n' "$*"
@@ -35,14 +34,6 @@ log() {
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
-}
-
-backup_file() {
-    local file="$1"
-
-    [[ -e "$file" ]] || return 0
-    install -d -m 0700 "$BACKUP_DIR"
-    cp -a -- "$file" "$BACKUP_DIR/$(basename "$file").$(date +%Y%m%d%H%M%S)"
 }
 
 validate_ipv4() {
@@ -114,8 +105,6 @@ chmod 0600 "$LOCAL_INVENTORY"
 
 log "Installing inventory and configuration in $ANSIBLE_DIR"
 install -d -m 0755 "$ANSIBLE_DIR"
-backup_file "$ANSIBLE_DIR/hosts"
-backup_file "$ANSIBLE_DIR/ansible.cfg"
 install -m 0600 "$LOCAL_INVENTORY" "$ANSIBLE_DIR/hosts"
 install -m 0644 "$LOCAL_CONFIG" "$ANSIBLE_DIR/ansible.cfg"
 

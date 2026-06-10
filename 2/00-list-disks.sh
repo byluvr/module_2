@@ -3,7 +3,6 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/.env}"
-ENV_EXAMPLE="$SCRIPT_DIR/.env.example"
 
 die() {
     printf 'ERROR: %s\n' "$*" >&2
@@ -13,19 +12,15 @@ die() {
 [[ $EUID -eq 0 ]] || die "run this script as root"
 
 if [[ ! -f "$ENV_FILE" ]]; then
-    [[ -f "$ENV_EXAMPLE" ]] ||
-        die "$ENV_FILE and $ENV_EXAMPLE are missing"
-    cp -- "$ENV_EXAMPLE" "$ENV_FILE"
-    chmod 0600 "$ENV_FILE"
-    echo "Created $ENV_FILE from .env.example"
+    die "$ENV_FILE is missing"
 fi
 
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 
 EXPECTED_DISK_SIZE_GIB="${EXPECTED_DISK_SIZE_GIB:-1}"
-RAID_LEVEL="${RAID_LEVEL:-0}"
-RAID_NAME="${RAID_NAME:-md0}"
+RAID_LEVEL="${RAID_LEVEL:?RAID_LEVEL is required in $ENV_FILE}"
+RAID_NAME="${RAID_NAME:?RAID_NAME is required in $ENV_FILE}"
 RAID_NAME="${RAID_NAME#/dev/}"
 RAID_DEVICE="/dev/$RAID_NAME"
 
@@ -116,6 +111,7 @@ fi
 printf 'Selected disks: %s\n' "${candidates[*]}"
 
 temp_file="$(mktemp)"
+trap 'rm -f -- "${temp_file:-}"' EXIT
 awk -v disks="${candidates[*]}" '
     BEGIN { disks_replaced = 0 }
     /^RAID_DISKS=/ {
@@ -132,6 +128,7 @@ awk -v disks="${candidates[*]}" '
 
 install -m 0600 "$temp_file" "$ENV_FILE"
 rm -f -- "$temp_file"
+trap - EXIT
 
 echo
 echo "Updated RAID_DISKS in $ENV_FILE"

@@ -1,73 +1,15 @@
-# Очистка учебного стенда
+# Очистка module_2
 
-Сценарии удаляют технические артефакты автоматизации и локальную копию
-`module_2`, сохраняя настроенные службы и данные стенда.
+Скрипты удаляют только каталог проекта и при необходимости отключают `Additional.iso`. Настроенные службы и `/mnt/nfs/test.txt` сохраняются.
 
-Не удаляются:
+В `.env` задайте `DELETE_PROJECT` и `UNMOUNT_ADDITIONAL_ISO`.
 
-- shell history;
-- systemd journal и системные логи;
-- рабочие конфигурации сервисов;
-- базы MariaDB, Docker-контейнеры и volumes;
-- SSH-ключи Ansible;
-- файлы веб-приложений.
-
-## Настройки
-
-В `.env` по умолчанию включены:
-
-```bash
-DELETE_PROJECT=yes
-UNMOUNT_ADDITIONAL_ISO=yes
-REMOVE_NFS_TEST_FILE=yes
-```
-
-Для проверки без удаления проекта временно установите
-`DELETE_PROJECT=no`.
-
-## Важное условие запуска
-
-Не запускайте сценарий, находясь внутри каталога `module_2`, потому что он
-удаляется в конце. Сначала перейдите, например, в `/root`, а затем укажите
-полный путь к нужному сценарию.
-
-## HQ-CLI
-
-Удаляются резервные копии заданий 1, 3, 4, 5 и тестовый файл NFS.
+Запускайте нужный файл от `root` из каталога вне `module_2`:
 
 ```bash
 cd /root
-bash /root/module_2/clear/01-hq-cli-clean.sh
+bash /путь/module_2/clear/01-hq-cli-clean.sh
+bash /путь/module_2/clear/02-hq-srv-clean.sh
+bash /путь/module_2/clear/03-br-srv-clean.sh
+bash /путь/module_2/clear/04-isp-clean.sh
 ```
-
-## HQ-SRV
-
-Удаляются резервные копии заданий 2, 3, 4, отчёты NFS и веб-приложения.
-Также снимается монтирование `Additional.iso`.
-
-```bash
-cd /root
-bash /root/module_2/clear/02-hq-srv-clean.sh
-```
-
-## BR-SRV
-
-Удаляются резервные копии заданий 4 и 5. Также снимается монтирование
-`Additional.iso`.
-
-```bash
-cd /root
-bash /root/module_2/clear/03-br-srv-clean.sh
-```
-
-## ISP
-
-Удаляются резервные копии chrony и nginx, а также отчёт chrony.
-
-```bash
-cd /root
-bash /root/module_2/clear/04-isp-clean.sh
-```
-
-Для EcoRouter отдельный сценарий не требуется: задания на них выполнялись
-вручную, а каталог проекта не использовался.
