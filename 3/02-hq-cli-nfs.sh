@@ -12,7 +12,7 @@ else
     exit 1
 fi
 
-NFS_SERVER_IP="${NFS_SERVER_IP:-192.168.1.10}"
+NFS_SERVER_IP="${NFS_SERVER_IP:?NFS_SERVER_IP is required in $ENV_FILE}"
 NFS_EXPORT_PATH="${NFS_EXPORT_PATH:-/raid/nfs}"
 NFS_CLIENT_MOUNT="${NFS_CLIENT_MOUNT:-/mnt/nfs}"
 NFS_MOUNT_OPTIONS="${NFS_MOUNT_OPTIONS:-defaults,_netdev}"
@@ -27,15 +27,6 @@ log() {
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
-}
-
-backup_file() {
-    local file="$1"
-    local backup_dir=/root/module_2_task_3_backups
-
-    [[ -e "$file" ]] || return 0
-    install -d -m 0700 "$backup_dir"
-    cp -a -- "$file" "$backup_dir/$(basename "$file").$(date +%Y%m%d%H%M%S)"
 }
 
 [[ $EUID -eq 0 ]] || die "run this script as root"
@@ -63,6 +54,7 @@ install -d -m 0777 "$NFS_CLIENT_MOUNT"
 chmod 0777 "$NFS_CLIENT_MOUNT"
 
 temp_file="$(mktemp)"
+trap 'rm -f -- "${temp_file:-}"' EXIT
 awk -v source="$NFS_SOURCE" -v mount_point="$NFS_CLIENT_MOUNT" '
     /^[[:space:]]*#/ || NF == 0 {
         print
@@ -78,9 +70,9 @@ printf '%s %s nfs %s 0 0\n' \
     "$NFS_SOURCE" "$NFS_CLIENT_MOUNT" "$NFS_MOUNT_OPTIONS" >> "$temp_file"
 
 log "Updating $FSTAB"
-backup_file "$FSTAB"
 install -m 0644 "$temp_file" "$FSTAB"
 rm -f -- "$temp_file"
+trap - EXIT
 
 if mountpoint -q "$NFS_CLIENT_MOUNT"; then
     mounted_source="$(findmnt -nro SOURCE --target "$NFS_CLIENT_MOUNT")"
@@ -109,4 +101,3 @@ log "NFS client configuration completed"
 findmnt "$NFS_CLIENT_MOUNT"
 df -hT "$NFS_CLIENT_MOUNT"
 ls -l "$NFS_CLIENT_MOUNT/$NFS_TEST_FILE"
-

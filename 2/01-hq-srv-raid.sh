@@ -8,12 +8,12 @@ if [[ -f "$ENV_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$ENV_FILE"
 else
-    echo "ERROR: $ENV_FILE not found. Copy .env.example to .env and edit it." >&2
+    echo "ERROR: $ENV_FILE not found." >&2
     exit 1
 fi
 
-RAID_NAME="${RAID_NAME:-md0}"
-RAID_LEVEL="${RAID_LEVEL:-0}"
+RAID_NAME="${RAID_NAME:?RAID_NAME is required in $ENV_FILE}"
+RAID_LEVEL="${RAID_LEVEL:?RAID_LEVEL is required in $ENV_FILE}"
 RAID_DISKS="${RAID_DISKS:-}"
 EXPECTED_DISK_SIZE_GIB="${EXPECTED_DISK_SIZE_GIB:-1}"
 CREATE_PARTITION="${CREATE_PARTITION:-yes}"
@@ -36,15 +36,6 @@ log() {
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
-}
-
-backup_file() {
-    local file="$1"
-    local backup_dir=/root/module_2_task_2_backups
-
-    [[ -e "$file" ]] || return 0
-    install -d -m 0700 "$backup_dir"
-    cp -a -- "$file" "$backup_dir/$(basename "$file").$(date +%Y%m%d%H%M%S)"
 }
 
 normalize_devices() {
@@ -91,6 +82,7 @@ write_mdadm_config() {
     local array_line="$1"
     local temp_file
     temp_file="$(mktemp)"
+    trap 'rm -f -- "${temp_file:-}"' RETURN
 
     if [[ -f "$MDADM_CONFIG" ]]; then
         awk -v device="$RAID_DEVICE" '
@@ -99,9 +91,9 @@ write_mdadm_config() {
     fi
 
     printf '%s\n' "$array_line" >> "$temp_file"
-    backup_file "$MDADM_CONFIG"
     install -m 0644 "$temp_file" "$MDADM_CONFIG"
     rm -f -- "$temp_file"
+    trap - RETURN
 }
 
 write_fstab() {
@@ -109,6 +101,7 @@ write_fstab() {
     local filesystem_device="$2"
     local temp_file
     temp_file="$(mktemp)"
+    trap 'rm -f -- "${temp_file:-}"' RETURN
 
     awk -v mount_point="$MOUNT_POINT" \
         -v raid_device="$RAID_DEVICE" \
@@ -126,9 +119,9 @@ write_fstab() {
     printf 'UUID=%s %s %s defaults 0 2\n' \
         "$uuid" "$MOUNT_POINT" "$FILESYSTEM" >> "$temp_file"
 
-    backup_file "$FSTAB"
     install -m 0644 "$temp_file" "$FSTAB"
     rm -f -- "$temp_file"
+    trap - RETURN
 }
 
 [[ $EUID -eq 0 ]] || die "run this script as root"

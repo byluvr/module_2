@@ -8,16 +8,16 @@ if [[ -f "$ENV_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$ENV_FILE"
 else
-    echo "ERROR: $ENV_FILE not found. Copy .env.example to .env and edit it." >&2
+    echo "ERROR: $ENV_FILE not found." >&2
     exit 1
 fi
 
 DOMAIN_FQDN="${DOMAIN_FQDN:-au-team.irpo}"
 DOMAIN_NETBIOS="${DOMAIN_NETBIOS:-AU-TEAM}"
 DOMAIN_ADMIN_USER="${DOMAIN_ADMIN_USER:-administrator}"
-BR_SRV_IP="${BR_SRV_IP:-192.168.0.2}"
+BR_SRV_IP="${BR_SRV_IP:?BR_SRV_IP is required in $ENV_FILE}"
 HQ_CLI_HOSTNAME="${HQ_CLI_HOSTNAME:-hq-cli}"
-HQ_CLI_INTERFACE="${HQ_CLI_INTERFACE:-ens19}"
+HQ_CLI_INTERFACE="${HQ_CLI_INTERFACE:?HQ_CLI_INTERFACE is required in $ENV_FILE}"
 HQ_CLI_COMPUTER_NAME="${HQ_CLI_HOSTNAME%%.*}"
 HQ_CLI_FQDN="${HQ_CLI_COMPUTER_NAME}.${DOMAIN_FQDN}"
 

@@ -12,11 +12,10 @@ else
     exit 1
 fi
 
-ISP_HQ_IP="${ISP_HQ_IP:-172.16.1.1}"
-ISP_BR_IP="${ISP_BR_IP:-172.16.2.1}"
+ISP_HQ_IP="${ISP_HQ_IP:?ISP_HQ_IP is required in $ENV_FILE}"
+ISP_BR_IP="${ISP_BR_IP:?ISP_BR_IP is required in $ENV_FILE}"
 NTP_SERVER_IP_OVERRIDE="${NTP_SERVER_IP_OVERRIDE:-}"
 CHRONY_CONFIG=/etc/chrony.conf
-BACKUP_DIR=/root/module_2_task_4_backups
 
 log() {
     printf '[chrony client] %s\n' "$*"
@@ -25,14 +24,6 @@ log() {
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
-}
-
-backup_file() {
-    local file="$1"
-
-    [[ -e "$file" ]] || return 0
-    install -d -m 0700 "$BACKUP_DIR"
-    cp -a -- "$file" "$BACKUP_DIR/$(basename "$file").$(date +%Y%m%d%H%M%S)"
 }
 
 [[ $EUID -eq 0 ]] || die "run this script as root"
@@ -66,6 +57,7 @@ ping -c 1 -W 2 "$NTP_SERVER_IP" >/dev/null ||
     die "ISP address $NTP_SERVER_IP is unreachable"
 
 temp_config="$(mktemp)"
+trap 'rm -f -- "${temp_config:-}"' EXIT
 cat > "$temp_config" <<EOF
 # Managed by module_2/4/02-alt-chrony-client.sh
 server $NTP_SERVER_IP iburst prefer
@@ -78,10 +70,10 @@ log "Validating the chrony configuration"
 chronyd -p -f "$temp_config" >/dev/null
 
 if [[ ! -f "$CHRONY_CONFIG" ]] || ! cmp -s "$temp_config" "$CHRONY_CONFIG"; then
-    backup_file "$CHRONY_CONFIG"
     install -m 0644 "$temp_config" "$CHRONY_CONFIG"
 fi
 rm -f -- "$temp_config"
+trap - EXIT
 
 log "Starting chronyd"
 systemctl enable --now chronyd
@@ -93,4 +85,3 @@ log "Client configuration completed"
 printf 'NTP server selected for %s: %s\n' "$short_hostname" "$NTP_SERVER_IP"
 chronyc sources -v
 chronyc tracking
-

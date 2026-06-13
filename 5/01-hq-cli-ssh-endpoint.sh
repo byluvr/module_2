@@ -14,12 +14,11 @@ fi
 
 LINUX_SSH_USER="${LINUX_SSH_USER:-sshuser}"
 LINUX_SSH_PASSWORD="${LINUX_SSH_PASSWORD:-P@ssw0rd}"
-LINUX_SSH_PORT="${LINUX_SSH_PORT:-2026}"
+LINUX_SSH_PORT="${LINUX_SSH_PORT:?LINUX_SSH_PORT is required in $ENV_FILE}"
 SSH_ALLOW_USERS="${SSH_ALLOW_USERS:-$LINUX_SSH_USER}"
 SSH_MAX_AUTH_TRIES="${SSH_MAX_AUTH_TRIES:-2}"
 SSHD_CONFIG=/etc/openssh/sshd_config
 SUDOERS_FILE="/etc/sudoers.d/60-ansible-$LINUX_SSH_USER"
-BACKUP_DIR=/root/module_2_task_5_backups
 
 log() {
     printf '[HQ-CLI SSH] %s\n' "$*"
@@ -28,14 +27,6 @@ log() {
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
-}
-
-backup_file() {
-    local file="$1"
-
-    [[ -e "$file" ]] || return 0
-    install -d -m 0700 "$BACKUP_DIR"
-    cp -a -- "$file" "$BACKUP_DIR/$(basename "$file").$(date +%Y%m%d%H%M%S)"
 }
 
 [[ $EUID -eq 0 ]] || die "run this script as root"
@@ -77,6 +68,7 @@ visudo -cf /etc/sudoers
 
 log "Configuring sshd"
 temp_config="$(mktemp)"
+trap 'rm -f -- "${temp_config:-}"' EXIT
 awk '
     $0 == "# BEGIN MODULE_2_TASK_5" {
         in_managed_block = 1
@@ -108,10 +100,10 @@ EOF
 
 sshd -t -f "$temp_config"
 if ! cmp -s "$temp_config" "$SSHD_CONFIG"; then
-    backup_file "$SSHD_CONFIG"
     install -m 0600 "$temp_config" "$SSHD_CONFIG"
 fi
 rm -f -- "$temp_config"
+trap - EXIT
 
 log "Enabling and restarting sshd"
 systemctl enable sshd

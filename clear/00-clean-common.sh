@@ -12,9 +12,6 @@ fi
 DELETE_PROJECT="${DELETE_PROJECT:-yes}"
 UNMOUNT_ADDITIONAL_ISO="${UNMOUNT_ADDITIONAL_ISO:-yes}"
 ISO_MOUNT="${ISO_MOUNT:-/mnt}"
-REMOVE_NFS_TEST_FILE="${REMOVE_NFS_TEST_FILE:-yes}"
-NFS_CLIENT_MOUNT="${NFS_CLIENT_MOUNT:-/mnt/nfs}"
-NFS_TEST_FILE="${NFS_TEST_FILE:-test.txt}"
 CLEANUP_ROLE=
 
 log() {
@@ -56,7 +53,6 @@ prepare_cleanup() {
     [[ $EUID -eq 0 ]] || die "run this script as root"
     validate_yes_no DELETE_PROJECT "$DELETE_PROJECT"
     validate_yes_no UNMOUNT_ADDITIONAL_ISO "$UNMOUNT_ADDITIONAL_ISO"
-    validate_yes_no REMOVE_NFS_TEST_FILE "$REMOVE_NFS_TEST_FILE"
     validate_project_dir
 
     if [[ "$DELETE_PROJECT" == yes ]]; then
@@ -67,50 +63,7 @@ prepare_cleanup() {
         fi
     fi
 
-    log "Removing generated automation artifacts only"
-}
-
-remove_artifacts() {
-    local path
-
-    for path in "$@"; do
-        case "$path" in
-            /root/module_2_task_* | /root/sudoers-backups)
-                ;;
-            *)
-                die "refusing to remove an unexpected artifact path: $path"
-                ;;
-        esac
-
-        if [[ -e "$path" || -L "$path" ]]; then
-            log "Removing $path"
-            rm -rf -- "$path"
-        else
-            log "Already absent: $path"
-        fi
-    done
-}
-
-remove_nfs_test_file() {
-    local test_path
-
-    [[ "$REMOVE_NFS_TEST_FILE" == yes ]] || return 0
-    [[ "$NFS_CLIENT_MOUNT" == /* && "$NFS_CLIENT_MOUNT" != / ]] ||
-        die "NFS_CLIENT_MOUNT must be a safe absolute path"
-    [[ -n "$NFS_TEST_FILE" && "$NFS_TEST_FILE" != */* ]] ||
-        die "NFS_TEST_FILE must be a file name without slashes"
-
-    test_path="$NFS_CLIENT_MOUNT/$NFS_TEST_FILE"
-    if mountpoint -q "$NFS_CLIENT_MOUNT"; then
-        if [[ -f "$test_path" ]]; then
-            log "Removing NFS test file $test_path"
-            rm -f -- "$test_path"
-        else
-            log "NFS test file is already absent"
-        fi
-    else
-        log "NFS is not mounted at $NFS_CLIENT_MOUNT; test file cleanup skipped"
-    fi
+    log "Preparing project cleanup"
 }
 
 unmount_additional_iso() {
