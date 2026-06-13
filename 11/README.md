@@ -1,4 +1,3 @@
-# on HQ-CLI
-```bash
-apt-get install –y yandex-browser-stable
-```
+# Задание 11
+
+Автоматизация для этого задания не требуется.

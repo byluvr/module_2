@@ -8,7 +8,7 @@ if [[ -f "$ENV_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$ENV_FILE"
 else
-    echo "ERROR: $ENV_FILE not found. Copy .env.example to .env and edit it." >&2
+    echo "ERROR: $ENV_FILE not found." >&2
     exit 1
 fi
 
@@ -31,11 +31,11 @@ disable_unrestricted_wheel_rules() {
     local line
     local changed=no
     local temp_file
-    local backup_dir=/root/sudoers-backups
     local rule_re
 
     rule_re='^[[:space:]]*(%wheel|WHEEL_USERS)[[:space:]]+ALL[[:space:]]*=[[:space:]]*\([^)]*\)[[:space:]]*(NOPASSWD:[[:space:]]*)?ALL[[:space:]]*(#.*)?$'
     temp_file="$(mktemp)"
+    trap 'rm -f -- "${temp_file:-}"' RETURN
 
     while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ "$line" =~ $rule_re ]]; then
@@ -48,13 +48,12 @@ disable_unrestricted_wheel_rules() {
     done < "$file"
 
     if [[ "$changed" == yes ]]; then
-        install -d -m 0700 "$backup_dir"
-        cp -a -- "$file" "$backup_dir/$(basename "$file").$(date +%Y%m%d%H%M%S)"
         install -m 0440 "$temp_file" "$file"
         log "Disabled an unrestricted wheel rule in $file"
     fi
 
     rm -f -- "$temp_file"
+    trap - RETURN
 }
 
 [[ $EUID -eq 0 ]] || die "run this script as root"

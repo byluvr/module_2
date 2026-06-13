@@ -14,8 +14,8 @@ fi
 
 WEB_DOMAIN="${WEB_DOMAIN:-web.au-team.irpo}"
 DOCKER_DOMAIN="${DOCKER_DOMAIN:-docker.au-team.irpo}"
-WEB_UPSTREAM="${WEB_UPSTREAM:-172.16.1.2:8080}"
-DOCKER_UPSTREAM="${DOCKER_UPSTREAM:-172.16.2.2:8080}"
+WEB_UPSTREAM="${WEB_UPSTREAM:?WEB_UPSTREAM is required in $ENV_FILE}"
+DOCKER_UPSTREAM="${DOCKER_UPSTREAM:?DOCKER_UPSTREAM is required in $ENV_FILE}"
 AUTH_USER="${AUTH_USER:-WEB}"
 AUTH_PASSWORD="${AUTH_PASSWORD:-P@ssw0rd}"
 AUTH_REALM="${AUTH_REALM:-Restricted area}"
@@ -25,7 +25,6 @@ NGINX_ENABLED_DIR=/etc/nginx/sites-enabled.d
 NGINX_SITE_CONFIG="$NGINX_AVAILABLE_DIR/default.conf"
 NGINX_SITE_LINK="$NGINX_ENABLED_DIR/default.conf"
 HTPASSWD_FILE=/etc/nginx/.htpasswd
-BACKUP_DIR=/root/module_2_task_9_10_backups
 
 log() {
     printf '[ISP nginx] %s\n' "$*"
@@ -34,14 +33,6 @@ log() {
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
-}
-
-backup_file() {
-    local file="$1"
-
-    [[ -e "$file" || -L "$file" ]] || return 0
-    install -d -m 0700 "$BACKUP_DIR"
-    cp -a -- "$file" "$BACKUP_DIR/$(basename "$file").$(date +%Y%m%d%H%M%S)"
 }
 
 validate_domain() {
@@ -97,7 +88,6 @@ check_http_endpoint WEB_UPSTREAM "$WEB_UPSTREAM"
 check_http_endpoint DOCKER_UPSTREAM "$DOCKER_UPSTREAM"
 
 log "Creating the Basic Auth account"
-backup_file "$HTPASSWD_FILE"
 htpasswd -bc "$HTPASSWD_FILE" "$AUTH_USER" "$AUTH_PASSWORD"
 if getent group nginx >/dev/null 2>&1; then
     chown root:nginx "$HTPASSWD_FILE"
@@ -110,6 +100,7 @@ fi
 log "Writing the reverse proxy configuration"
 install -d -m 0755 "$NGINX_AVAILABLE_DIR" "$NGINX_ENABLED_DIR"
 temp_config="$(mktemp)"
+trap 'rm -f -- "${temp_config:-}"' EXIT
 cat > "$temp_config" <<EOF
 # Managed by module_2/9-10/01-isp-nginx-proxy.sh
 server {
@@ -143,13 +134,12 @@ server {
 EOF
 
 if [[ ! -f "$NGINX_SITE_CONFIG" ]] || ! cmp -s "$temp_config" "$NGINX_SITE_CONFIG"; then
-    backup_file "$NGINX_SITE_CONFIG"
     install -m 0644 "$temp_config" "$NGINX_SITE_CONFIG"
 fi
 rm -f -- "$temp_config"
+trap - EXIT
 
 if [[ -e "$NGINX_SITE_LINK" && ! -L "$NGINX_SITE_LINK" ]]; then
-    backup_file "$NGINX_SITE_LINK"
     rm -f -- "$NGINX_SITE_LINK"
 fi
 ln -sfn ../sites-available.d/default.conf "$NGINX_SITE_LINK"

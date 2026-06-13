@@ -12,12 +12,11 @@ else
     exit 1
 fi
 
-NFS_SERVER_IP="${NFS_SERVER_IP:-192.168.1.10}"
-HQ_CLI_SUBNET="${HQ_CLI_SUBNET:-192.168.2.0/24}"
+NFS_SERVER_IP="${NFS_SERVER_IP:?NFS_SERVER_IP is required in $ENV_FILE}"
+HQ_CLI_SUBNET="${HQ_CLI_SUBNET:?HQ_CLI_SUBNET is required in $ENV_FILE}"
 NFS_EXPORT_PATH="${NFS_EXPORT_PATH:-/raid/nfs}"
 NFS_EXPORT_OPTIONS="${NFS_EXPORT_OPTIONS:-rw,sync,no_subtree_check,no_root_squash}"
 EXPORTS_FILE=/etc/exports
-REPORT_FILE=/root/module_2_task_3_nfs_report.txt
 
 log() {
     printf '[HQ-SRV NFS] %s\n' "$*"
@@ -26,15 +25,6 @@ log() {
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
-}
-
-backup_file() {
-    local file="$1"
-    local backup_dir=/root/module_2_task_3_backups
-
-    [[ -e "$file" ]] || return 0
-    install -d -m 0700 "$backup_dir"
-    cp -a -- "$file" "$backup_dir/$(basename "$file").$(date +%Y%m%d%H%M%S)"
 }
 
 select_nfs_service() {
@@ -72,6 +62,7 @@ install -d -m 0777 "$NFS_EXPORT_PATH"
 chmod 0777 "$NFS_EXPORT_PATH"
 
 temp_file="$(mktemp)"
+trap 'rm -f -- "${temp_file:-}"' EXIT
 if [[ -f "$EXPORTS_FILE" ]]; then
     awk -v export_path="$NFS_EXPORT_PATH" '
         /^[[:space:]]*#/ || NF == 0 {
@@ -89,9 +80,9 @@ printf '%s %s(%s)\n' \
     "$NFS_EXPORT_PATH" "$HQ_CLI_SUBNET" "$NFS_EXPORT_OPTIONS" >> "$temp_file"
 
 log "Updating $EXPORTS_FILE"
-backup_file "$EXPORTS_FILE"
 install -m 0644 "$temp_file" "$EXPORTS_FILE"
 rm -f -- "$temp_file"
+trap - EXIT
 
 if command -v control >/dev/null 2>&1 &&
     control rpcbind >/dev/null 2>&1; then
@@ -117,24 +108,5 @@ if ! exportfs -v | awk -v path="$NFS_EXPORT_PATH" -v subnet="$HQ_CLI_SUBNET" '
     die "$NFS_EXPORT_PATH is not exported to $HQ_CLI_SUBNET"
 fi
 
-log "Writing parameters for the report"
-{
-    printf 'Module 2, task 3 - NFS server\n'
-    printf 'Server: %s (%s)\n' "$(hostname -f 2>/dev/null || hostname)" "$NFS_SERVER_IP"
-    printf 'Export path: %s\n' "$NFS_EXPORT_PATH"
-    printf 'Allowed network: %s\n' "$HQ_CLI_SUBNET"
-    printf 'Export options: %s\n' "$NFS_EXPORT_OPTIONS"
-    printf 'Service: %s\n' "$nfs_service"
-    printf '\n/etc/exports:\n'
-    grep -F "$NFS_EXPORT_PATH" "$EXPORTS_FILE"
-    printf '\nActive exports:\n'
-    exportfs -v
-    printf '\nFilesystem:\n'
-    findmnt -T "$NFS_EXPORT_PATH"
-} > "$REPORT_FILE"
-chmod 0600 "$REPORT_FILE"
-
 log "NFS server configuration completed"
-printf 'Report data: %s\n' "$REPORT_FILE"
 exportfs -v
-
