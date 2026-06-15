@@ -1,3 +1,5 @@
 # Задание 11
 
-Автоматизация для этого задания не требуется.
+```bash
+apt-get install yandex-browser-stable -y
+```

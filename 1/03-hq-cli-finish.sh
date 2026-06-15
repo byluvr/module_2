@@ -13,6 +13,7 @@ else
 fi
 
 DOMAIN_FQDN="${DOMAIN_FQDN:-au-team.irpo}"
+BR_SRV_IP="${BR_SRV_IP:?BR_SRV_IP is required in $ENV_FILE}"
 HQ_GROUP="${HQ_GROUP:-hq}"
 HQ_USER_PREFIX="${HQ_USER_PREFIX:-hquser}"
 SUDOERS_FILE="/etc/sudoers.d/50-hq-limited"
@@ -59,20 +60,60 @@ disable_unrestricted_wheel_rules() {
 [[ $EUID -eq 0 ]] || die "run this script as root"
 
 log "Installing required local packages"
-apt-get install -y libnss-role sudo
+apt-get install -y bind-utils libnss-role sudo
+
+[[ -s /etc/sssd/sssd.conf ]] ||
+    die "/etc/sssd/sssd.conf is missing; HQ-CLI is not joined to the domain"
+chmod 0600 /etc/sssd/sssd.conf
+
+log "Refreshing the resolver configuration"
+command -v resolvconf >/dev/null 2>&1 ||
+    die "resolvconf is not installed"
+resolvconf -u
+
+first_nameserver="$(awk '$1 == "nameserver" { print $2; exit }' /etc/resolv.conf)"
+if [[ "$first_nameserver" != "$BR_SRV_IP" ]]; then
+    cat /etc/resolv.conf >&2
+    die "the first DNS server is $first_nameserver, expected BR-SRV ($BR_SRV_IP); rerun 02-hq-cli-prepare.sh"
+fi
+
+host -t SRV "_ldap._tcp.$DOMAIN_FQDN" >/dev/null ||
+    die "the system resolver cannot find the LDAP service of $DOMAIN_FQDN"
+host -t SRV "_kerberos._udp.$DOMAIN_FQDN" >/dev/null ||
+    die "the system resolver cannot find the Kerberos service of $DOMAIN_FQDN"
+
+log "Enabling and restarting SSSD"
+systemctl enable sssd
+if ! systemctl restart sssd; then
+    journalctl -u sssd -n 50 --no-pager >&2 || true
+    die "sssd failed to start"
+fi
+systemctl is-active --quiet sssd ||
+    die "sssd is not active"
+
+if command -v sss_cache >/dev/null 2>&1; then
+    sss_cache -E
+fi
 
 log "Checking that domain users are visible through NSS"
 test_user="${HQ_USER_PREFIX}1"
 resolved_user=""
-for candidate in "$test_user" "$test_user@$DOMAIN_FQDN"; do
-    if getent passwd "$candidate" >/dev/null 2>&1; then
-        resolved_user="$candidate"
-        break
+for attempt in {1..15}; do
+    for candidate in "$test_user" "$test_user@$DOMAIN_FQDN"; do
+        if getent passwd "$candidate" >/dev/null 2>&1; then
+            resolved_user="$candidate"
+            break 2
+        fi
+    done
+    if (( attempt < 15 )); then
+        sleep 1
     fi
 done
 
-[[ -n "$resolved_user" ]] ||
-    die "domain user $test_user is not visible; check the domain join, SSSD and DNS"
+if [[ -z "$resolved_user" ]]; then
+    journalctl -u sssd -n 50 --no-pager >&2 || true
+    die "domain user $test_user is not visible; check the domain join, SSSD, DNS and system time"
+fi
 
 log "Ensuring the NSS role module is enabled"
 role_status="$(control libnss-role 2>/dev/null || true)"

@@ -24,6 +24,8 @@ reboot
 ./03-hq-cli-finish.sh
 ```
 
+Скрипт включает `sssd` в автозагрузку. Если после следующей перезагрузки доменный вход не работает, войдите как `root` и повторно запустите `03-hq-cli-finish.sh`.
+
 Если `sudo` изначально недоступен, войдите как `root` и временно включите штатное правило `WHEEL_USERS` через `visudo`.
 
 ## Проверка
@@ -31,6 +33,8 @@ reboot
 ```bash
 host -t SRV _ldap._tcp.au-team.irpo 192.168.3.10
 host mon.au-team.irpo 192.168.3.10
+systemctl is-enabled sssd
+systemctl is-active sssd
 getent passwd hquser1
 sudo -l -U hquser1
 ```
